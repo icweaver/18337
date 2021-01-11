@@ -4,6 +4,12 @@
 using Markdown
 using InteractiveUtils
 
+# ╔═╡ 3509efff-7beb-4c51-9217-4e9a1f2618e0
+using StaticArrays
+
+# ╔═╡ f8357564-8cf5-4329-86da-ea182471e0c9
+using Base.Threads
+
 # ╔═╡ 8b6135cb-32a9-4849-8fde-e6d8b49a4fc9
 using PlutoUI, BenchmarkTools
 
@@ -96,6 +102,132 @@ md"""
 We see a speed-up when we respect the memory layout of our data because the CPU does not need to skip around as much or break the heuristics it uses to guess which bits of data we might need ahead of time.
 """
 
+# ╔═╡ 861210cf-10ee-4367-817b-f2fc446dd671
+md"""
+# Concurrency
+"""
+
+# ╔═╡ ca40e65a-ab7e-4fb9-a708-88ec8602eb42
+with_terminal() do
+	@time for i in 1:5
+		sleep(2)
+	end
+end
+
+# ╔═╡ 436cd061-93ea-45ec-a606-a09b2dd476f0
+with_terminal() do
+	@time @sync for i in 1:5
+		@async sleep(2)
+	end
+end
+
+# ╔═╡ c96d99bd-0d56-41dd-ac7a-57c5bffd9fc0
+md"""
+# Multi-threading
+"""
+
+# ╔═╡ a67cc8ad-d8ef-4830-8068-8aed7062377a
+md"""
+Let's start with a straightforward serial apprach to solving the Lorez equations first:
+"""
+
+# ╔═╡ f1c0022f-c12f-4c61-b6a0-61c2debe840d
+# Put it on the heap
+function lorenz!(du, u, p)
+	α, σ, ρ, β = p
+	@inbounds begin
+		du[1] = u[1] + α*(σ*(u[2] - u[1]))
+		du[2] = u[2] + α*(u[1]*(ρ - u[3] - u[2]))
+		du[3] = u[3] + α*(u[1]*u[2] - β*u[3])
+	end
+end
+
+# ╔═╡ c07e6957-a153-4bfa-a2a9-3ce6c4857922
+function solve_system_save_iip!(u, f, u0, p, n)
+	@inbounds u[1] = u0
+	@inbounds for i in 1:length(u)-1
+		f(u[i+1], u[i], p)
+	end
+	return u
+end
+
+# ╔═╡ 709e5550-c0dd-46bc-ac0d-77c83b648d22
+u_vec = [Vector{Float64}(undef, 3) for i in 1:1_000]
+
+# ╔═╡ bde73ff2-9fc3-4708-baed-03a9e56c8337
+p = (0.02, 10.0, 28.0, 8/3)
+
+# ╔═╡ 0c25ec5b-cb24-4c1e-80bd-3ba748119204
+with_terminal() do
+	@btime solve_system_save_iip!(u_vec, lorenz!, [1.0, 0.0, 0.0], p, 1_000)
+end
+
+# ╔═╡ 043baaf9-ffb5-4c26-be6c-40feaea960ea
+md"""
+Then SA
+"""
+
+# ╔═╡ 57d5c854-9f9c-4080-adda-c5484f9e449e
+function lorenz(u, p)
+	α, σ, ρ, β = p
+	@inbounds begin
+		du1 = u[1] + α*(σ*(u[2] - u[1]))
+		du2 = u[2] + α*(u[1]*(ρ - u[3] - u[2]))
+		du3 = u[3] + α*(u[1]*u[2] - β*u[3])
+	end
+	return @SVector [du1, du2, du3]
+end
+
+# ╔═╡ 23784b92-7280-4d56-a1f9-24a546383b72
+function solve_system_save!(u, f, u0, p, n)
+	@inbounds u[1] = u0
+	@inbounds for i in 1:length(u)-1
+		u[i+1] = f(u[i], p)
+	end
+	return u
+end
+
+# ╔═╡ 060d936d-c759-4064-9302-a454fa107bb7
+u = Vector{typeof(@SVector([1.0, 0.0, 0.0]))}(undef, 1_000)
+
+# ╔═╡ 1f27d62d-674a-4dfd-8912-2689515f17bc
+with_terminal() do
+	@btime solve_system_save!(u, lorenz, @SVector([1.0, 0.0, 0.0]), p, 1_000)
+end
+
+# ╔═╡ cea8ce9f-f657-44b9-b2ed-de3f3983ad08
+md"""
+Now let's try multithreaded. Shared memory, embarassingly parallel. Using heap approach from first example instead of SA example so that the data in each of our threads can talk to each other
+"""
+
+# ╔═╡ c2326f0b-356f-4353-b1e4-98960b4f4903
+function lorenz_mt!(du, u, p)
+	α, σ, ρ, β = p
+	let du=du, u=u, p=p
+		Threads.@threads for i in 1:3
+			@inbounds begin
+				if i == 1
+					du[1] = u[1] + α*(σ*(u[2] - u[1]))
+				elseif i == 2
+					du[2] = u[2] + α*(u[1]*(ρ - u[3] - u[2]))
+				else
+					du[3] = u[3] + α*(u[1]*u[2] - β*u[3])
+				end
+			end
+		end
+	end
+end
+
+# ╔═╡ d386b7f7-a4e8-41b6-a8be-b26cc657db85
+with_terminal() do
+	@btime solve_system_save_iip!(u_vec, lorenz_mt!, [1.0, 0.0, 0.0], p, 1_000)
+end
+
+# ╔═╡ 757aa797-177e-4e45-8a27-2e857ba17e38
+md"""
+Oof, that's bad. By like three orders of magnitude. A major reason why goes back to the [famous chart](http://ithare.com/infographics-operation-costs-in-cpu-clock-cycles/)  
+"""
+
 # ╔═╡ Cell order:
 # ╟─b51b7e9b-df76-4e57-83e6-03f78e0b1482
 # ╟─29033614-97ca-4b7f-b946-ebdb91edd088
@@ -113,4 +245,25 @@ We see a speed-up when we respect the memory layout of our data because the CPU 
 # ╠═7714f2a7-4da4-4779-9ffc-7f19be16543e
 # ╠═62b4b712-8468-4423-a65a-d6d9066fe378
 # ╟─c2ad7563-35d4-4a6d-838d-61be4443d567
+# ╟─861210cf-10ee-4367-817b-f2fc446dd671
+# ╠═ca40e65a-ab7e-4fb9-a708-88ec8602eb42
+# ╠═436cd061-93ea-45ec-a606-a09b2dd476f0
+# ╟─c96d99bd-0d56-41dd-ac7a-57c5bffd9fc0
+# ╟─a67cc8ad-d8ef-4830-8068-8aed7062377a
+# ╠═f1c0022f-c12f-4c61-b6a0-61c2debe840d
+# ╠═c07e6957-a153-4bfa-a2a9-3ce6c4857922
+# ╠═709e5550-c0dd-46bc-ac0d-77c83b648d22
+# ╠═bde73ff2-9fc3-4708-baed-03a9e56c8337
+# ╠═0c25ec5b-cb24-4c1e-80bd-3ba748119204
+# ╠═043baaf9-ffb5-4c26-be6c-40feaea960ea
+# ╠═3509efff-7beb-4c51-9217-4e9a1f2618e0
+# ╠═57d5c854-9f9c-4080-adda-c5484f9e449e
+# ╠═23784b92-7280-4d56-a1f9-24a546383b72
+# ╠═060d936d-c759-4064-9302-a454fa107bb7
+# ╠═1f27d62d-674a-4dfd-8912-2689515f17bc
+# ╟─cea8ce9f-f657-44b9-b2ed-de3f3983ad08
+# ╠═f8357564-8cf5-4329-86da-ea182471e0c9
+# ╠═c2326f0b-356f-4353-b1e4-98960b4f4903
+# ╠═d386b7f7-a4e8-41b6-a8be-b26cc657db85
+# ╠═757aa797-177e-4e45-8a27-2e857ba17e38
 # ╟─8b6135cb-32a9-4849-8fde-e6d8b49a4fc9
