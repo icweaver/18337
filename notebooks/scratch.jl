@@ -250,7 +250,7 @@ function _compute_trajectory_mean(u, u0, p)
 end
 
 # ╔═╡ 82543bf0-1b36-4511-8651-87d4492169cc
-# Using a closure to keep the API uniform. Also avoids passing in a global const
+# Using a closure to keep the API uniform
 compute_trajectory_mean(u0, p) = _compute_trajectory_mean(_u_cache, u0, p)
 
 # ╔═╡ b2f35677-cf25-42e3-8fa6-124d0186d0a7
@@ -312,10 +312,35 @@ const _u_cache_threads = [
 ]
 
 # ╔═╡ 1c08555c-ba4d-405e-a7de-4f53656556e9
+function compute_trajectory_mean_thread_safe(u0, p)
+	solve_system_save!(_u_cache_threads[Threads.threadid()], lorenz, u0, p, 1_000)
+	return mean(u)
+end
 
+# ╔═╡ 2fd4f919-9c75-4572-8562-879a31ad1c46
+threaded_out_thread_safe = tmap(
+	p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
+	ps
+)
 
-# ╔═╡ ccf164c4-c190-4f07-94e9-c48dd2a9ea1e
+# ╔═╡ 0e42e5c8-b690-45eb-be03-1a640020adc4
+md"""
+Let's check the output now:
+"""
 
+# ╔═╡ 104de4bf-9fba-41cc-99f8-ee17fc269a20
+serial_out_thread_safe = map(
+	p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
+	ps
+)
+
+# ╔═╡ da4a3ad9-eb52-440e-bcb6-951faffc4cdc
+threaded_out_thread_safe - serial_out_thread_safe
+
+# ╔═╡ 81b08415-d45d-40c2-bfb7-ee82c6d10e09
+md"""
+Nice, we are getting the same results as the serial approach now! How fast is it?
+"""
 
 # ╔═╡ Cell order:
 # ╟─b51b7e9b-df76-4e57-83e6-03f78e0b1482
@@ -372,5 +397,9 @@ const _u_cache_threads = [
 # ╟─e81bdefd-77e3-4b23-9ade-c9f8ee25535c
 # ╠═746db25d-f176-42d8-bec7-b9c9e159d5c6
 # ╠═1c08555c-ba4d-405e-a7de-4f53656556e9
-# ╠═ccf164c4-c190-4f07-94e9-c48dd2a9ea1e
+# ╠═2fd4f919-9c75-4572-8562-879a31ad1c46
+# ╟─0e42e5c8-b690-45eb-be03-1a640020adc4
+# ╠═104de4bf-9fba-41cc-99f8-ee17fc269a20
+# ╠═da4a3ad9-eb52-440e-bcb6-951faffc4cdc
+# ╟─81b08415-d45d-40c2-bfb7-ee82c6d10e09
 # ╟─8b6135cb-32a9-4849-8fde-e6d8b49a4fc9
