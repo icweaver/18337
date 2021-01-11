@@ -225,7 +225,7 @@ end
 
 # ╔═╡ 757aa797-177e-4e45-8a27-2e857ba17e38
 md"""
-Oof, that's bad. By like three orders of magnitude. A major reason why goes back to the [famous chart](http://ithare.com/infographics-operation-costs-in-cpu-clock-cycles/)  
+Oof, that's bad. By like three orders of magnitude. A major reason why goes back to the [famous chart](http://ithare.com/infographics-operation-costs-in-cpu-clock-cycles/). Creating threads is a relatively heavy CPU operation (Allocation+deallocation pair) compared to the handful of floating point operations ("Simple register-register op") we are doing per thread. In other words, mult-threading is completely overkill for this specific problem and is not worth the additional overhead incurred by just setting up the threads in the first place.
 """
 
 # ╔═╡ Cell order:
