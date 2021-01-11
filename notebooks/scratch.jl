@@ -314,7 +314,7 @@ const _u_cache_threads = [
 # ╔═╡ 1c08555c-ba4d-405e-a7de-4f53656556e9
 function compute_trajectory_mean_thread_safe(u0, p)
 	solve_system_save!(_u_cache_threads[Threads.threadid()], lorenz, u0, p, 1_000)
-	return mean(u)
+	return mean(_u_cache_threads[Threads.threadid()])
 end
 
 # ╔═╡ 2fd4f919-9c75-4572-8562-879a31ad1c46
@@ -328,18 +328,29 @@ md"""
 Let's check the output now:
 """
 
-# ╔═╡ 104de4bf-9fba-41cc-99f8-ee17fc269a20
-serial_out_thread_safe = map(
-	p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
-	ps
-)
-
 # ╔═╡ da4a3ad9-eb52-440e-bcb6-951faffc4cdc
-threaded_out_thread_safe - serial_out_thread_safe
+threaded_out_thread_safe - serial_out
 
 # ╔═╡ 81b08415-d45d-40c2-bfb7-ee82c6d10e09
 md"""
 Nice, we are getting the same results as the serial approach now! How fast is it?
+"""
+
+# ╔═╡ e586c612-bf08-4eaa-aa81-a50adc934017
+with_terminal() do
+	@btime map(
+		p -> compute_trajectory_mean(@SVector([1.0, 0.0, 0.0]), p),
+		$ps,
+	)
+	@btime tmap(
+		p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
+		$ps,
+	)
+end
+
+# ╔═╡ cb071d0a-345d-437d-9bc5-960c382e58d6
+md"""
+It's about 4 times faster! This seems reasonable since we used 4 thread here.
 """
 
 # ╔═╡ Cell order:
@@ -399,7 +410,8 @@ Nice, we are getting the same results as the serial approach now! How fast is it
 # ╠═1c08555c-ba4d-405e-a7de-4f53656556e9
 # ╠═2fd4f919-9c75-4572-8562-879a31ad1c46
 # ╟─0e42e5c8-b690-45eb-be03-1a640020adc4
-# ╠═104de4bf-9fba-41cc-99f8-ee17fc269a20
 # ╠═da4a3ad9-eb52-440e-bcb6-951faffc4cdc
 # ╟─81b08415-d45d-40c2-bfb7-ee82c6d10e09
+# ╠═e586c612-bf08-4eaa-aa81-a50adc934017
+# ╟─cb071d0a-345d-437d-9bc5-960c382e58d6
 # ╟─8b6135cb-32a9-4849-8fde-e6d8b49a4fc9
