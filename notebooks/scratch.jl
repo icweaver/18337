@@ -350,7 +350,89 @@ end
 
 # ╔═╡ cb071d0a-345d-437d-9bc5-960c382e58d6
 md"""
-It's about 4 times faster! This seems reasonable since we used 4 thread here.
+It's about 4 times faster! This seems reasonable since we used 4 threads here. Now on to parallelism.
+"""
+
+# ╔═╡ 9230f6c0-559a-11eb-20b2-452c1f5ae365
+md"""
+# Parallelism
+"""
+
+# ╔═╡ c4d6dc92-559b-11eb-16dc-d321bf41c2f7
+md"""
+Can spaws as many tasks as we want without worrying about slow-down from context switching between cores thanks to the job scheduler running in the background.
+"""
+
+# ╔═╡ ac1ba9fc-559a-11eb-334f-a9048f66eab1
+function tmap2(f, ps)
+	tasks = [Threads.@spawn f(ps[i]) for i in 1:1_000]
+	out = [fetch(t) for t in tasks]
+end
+
+# ╔═╡ e1b47780-559a-11eb-377a-813f1bd260f8
+threaded_out_parallel = tmap2(
+	p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
+	ps
+)
+
+# ╔═╡ 1910251a-559b-11eb-00ac-a9a34393631c
+threaded_out_parallel - serial_out
+
+# ╔═╡ 2ac0ba68-559b-11eb-3078-49322a8cb32c
+with_terminal() do
+	@btime map(
+		p -> compute_trajectory_mean(@SVector([1.0, 0.0, 0.0]), p),
+		$ps,
+	)
+	@btime tmap2(
+		p -> compute_trajectory_mean_thread_safe(@SVector([1.0, 0.0, 0.0]), p),
+		$ps,
+	)
+end
+
+# ╔═╡ f4815524-559b-11eb-1cbd-abea6a6634f5
+md"""
+Hmmm, so this (dynamic scheduling) beats out our serial approach, but is still slower than our previous multi-threading approach (static scheduling). What is the task based scheduling doing in our dynamic approach? On the fly (during runtime), it's looking at the 1000 tasks we've spawned and is scheduling which 6 to run at the same time. In contrast, our static scheduling approach chooses which clump of computations to put on thread 1, the next on thread 2, etc. So this is why our approach is slower in this particular case. It's from the runtime overhead that is incurred in the dynamic approach.
+
+So how can we determine which method to use for our particular problem. In this parameter seach example, each thread is doing roughly the same amount of work. The time it takes to do our compuation with the 13th parameter is the same as the time it takes for the 998th. Because of this, it makes sense to just go with the static approach of spreading (# of parameters / # of theads) to each thread since know all of this ahead of time. Let's look at what happens when this is not the case:
+"""
+
+# ╔═╡ b76bc602-559d-11eb-2ff1-4b49e79bc499
+function sleepmap_static()
+	out = Vector{Int}(undef, 24)
+	Threads.@threads for i in 1:24
+		sleep(i/10)
+		out[i] = i
+	end
+end
+
+# ╔═╡ df07baba-559d-11eb-0be5-87a6f9fae35d
+isleep(i) = (sleep(i/10); i)
+
+# ╔═╡ f775a6d4-559d-11eb-266d-87e32efbdb86
+function sleep_dynamic()
+	tasks = [Threads.@spawn(isleep(i)) for i in 1:24]
+	out = [fetch(t) for t in tasks]
+end
+
+# ╔═╡ f23d1fde-559e-11eb-1c11-e1773d10ca9f
+md"""
+In this example, we are creating an array [1, 2, ..., 24] in a staticly scheduled vs. dynamically scheduled way. Let's check out the result:
+"""
+
+# ╔═╡ 1a96f390-559e-11eb-3bab-2b9f1d01428f
+with_terminal() do
+	@btime sleepmap_static()
+	@btime sleep_dynamic()
+end
+
+# ╔═╡ 192c1366-559f-11eb-027d-c5e1c8168675
+md"""
+In this case, the dynamic approch is much faster! Why is this the case? Because the static approach junks our jobs in a linear fashion. For our four threads, thread 1 works on i=1-6, thread 2 on i=7-12, thread 3 on i=13-18, and thread 4 on i=19-24. In this case, not all threads will finish in the same amount of time. It increases by i/10, so thread 4 will actually take `sum(i/10 for i in 19:24) =` $(sum(i/10 for i in 19:24)) seconds, as we can see above!
+
+In contrast, our dynamic scheduler can actively choose which jobs get assigined to which threads, such that no one thread is given all of the slow jobs. Interestingly, the total time to run using this approach is actually faster than any grouping of six timings that we would assign to a thread. This is because parallelism also takes advantage of concurrency so that those groupings of 6 computations don't need to wait one at a time to run on a given thread. Sweet!
+
+So to recap, static scheduling is great when you know the runtime of each job ahead of time, dynamic is great otherwise.
 """
 
 # ╔═╡ Cell order:
@@ -414,4 +496,17 @@ It's about 4 times faster! This seems reasonable since we used 4 thread here.
 # ╟─81b08415-d45d-40c2-bfb7-ee82c6d10e09
 # ╠═e586c612-bf08-4eaa-aa81-a50adc934017
 # ╟─cb071d0a-345d-437d-9bc5-960c382e58d6
+# ╟─9230f6c0-559a-11eb-20b2-452c1f5ae365
+# ╟─c4d6dc92-559b-11eb-16dc-d321bf41c2f7
+# ╠═ac1ba9fc-559a-11eb-334f-a9048f66eab1
+# ╠═e1b47780-559a-11eb-377a-813f1bd260f8
+# ╠═1910251a-559b-11eb-00ac-a9a34393631c
+# ╠═2ac0ba68-559b-11eb-3078-49322a8cb32c
+# ╟─f4815524-559b-11eb-1cbd-abea6a6634f5
+# ╠═b76bc602-559d-11eb-2ff1-4b49e79bc499
+# ╠═df07baba-559d-11eb-0be5-87a6f9fae35d
+# ╠═f775a6d4-559d-11eb-266d-87e32efbdb86
+# ╟─f23d1fde-559e-11eb-1c11-e1773d10ca9f
+# ╠═1a96f390-559e-11eb-3bab-2b9f1d01428f
+# ╟─192c1366-559f-11eb-027d-c5e1c8168675
 # ╟─8b6135cb-32a9-4849-8fde-e6d8b49a4fc9
